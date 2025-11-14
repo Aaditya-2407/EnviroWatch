@@ -1,6 +1,6 @@
-# models/schemas.py
 from pydantic import BaseModel, Field, validator
-from typing import Literal, Optional
+from typing import Optional, Literal
+
 
 class PredictPayload(BaseModel):
     Location: str
@@ -23,7 +23,7 @@ class PredictPayload(BaseModel):
     Cloud3pm: Optional[float] = None
     Temp9am: Optional[float] = None
     Temp3pm: Optional[float] = None
-    RainToday: Optional[Literal["Yes","No"]] = "No"
+    RainToday: Optional[Literal["Yes", "No"]] = "No"
     Date_month: int = Field(..., ge=1, le=12)
     Date_day: int = Field(..., ge=1, le=31)
 
