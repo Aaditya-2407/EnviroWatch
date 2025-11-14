@@ -12,3 +12,7 @@ models/models/*.cbm
 # local pip freeze dump
 freeze_all.txt
 
+
+# trained models
+models/*.pkl
+*.pkl
