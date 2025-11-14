@@ -1,31 +1,58 @@
-from flask import Blueprint, request, jsonify
-from models.model_wrapper import model_wrapper
-# at top:
+# api/predict.py
+from flask import Blueprint, request, jsonify, current_app
 from models.schemas import PredictPayload
 from pydantic import ValidationError
-
-# inside predict route (replace current get_json logic)
-try:
-    payload = PredictPayload.parse_obj(data)  # will raise ValidationError on bad payload
-except ValidationError as e:
-    return jsonify({"ok": False, "error": "Invalid payload", "details": e.errors()}), 400
-
-# then use payload.dict() to pass to your model wrapper
-prediction_result = model.predict_from_dict(payload.dict())
-
+import traceback
 
 predict_bp = Blueprint("predict", __name__)
 
+def _sanitize_for_json(obj):
+    if isinstance(obj, Exception):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(x) for x in obj]
+    return obj
+
 @predict_bp.route("/predict", methods=["POST"])
 def predict():
+    payload_raw = request.get_json(silent=True)
+    if payload_raw is None:
+        return jsonify({"ok": False, "error": "No JSON received"}), 400
+
     try:
-        payload = request.json
+        payload = PredictPayload.model_validate(payload_raw)
+    except ValidationError as e:
+        details = _sanitize_for_json(e.errors() if hasattr(e, "errors") else str(e))
+        return jsonify({"ok": False, "error": "Invalid payload", "details": details}), 400
 
-        if not payload:
-            return jsonify({"error": "No JSON received"}), 400
-
-        result = model_wrapper.predict(payload)
-        return jsonify(result)
-
+    # Get wrapper (use app-level if present)
+    try:
+        wrapper = getattr(current_app, "model_wrapper", None)
+        if wrapper is None:
+            from models.model_wrapper import ModelWrapper
+            wrapper = ModelWrapper()
+    except FileNotFoundError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": f"Model init error: {e}"}), 500
+
+    try:
+        data_dict = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+        if hasattr(wrapper, "predict_from_dict"):
+            res = wrapper.predict_from_dict(data_dict)
+            return jsonify(res), 200
+
+        import pandas as pd
+        df = pd.DataFrame([data_dict])
+        pred = wrapper.predict(df)
+        proba = wrapper.predict_proba(df).tolist() if hasattr(wrapper, "predict_proba") else None
+        return jsonify({"ok": True, "prediction": pred.tolist() if hasattr(pred, "tolist") else pred, "probabilities": proba}), 200
+
+    except FileNotFoundError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": f"Internal server error: {str(e)}"}), 500

@@ -1,12 +1,7 @@
-# EnviroWatch 🌦️
-A rainfall prediction system using CatBoost + Flask + React.
+## Running locally
 
-## Structure
-- backend — Flask API, ML models, training scripts
-- frontend — React UI
-- docs — documentation
-
-## Team Tasks
-- Aaditya: Backend API + Model + Integration
-- Member 2: Frontend UI
-- Member 3: Docs + Deployment
+1. Create virtualenv and activate:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
