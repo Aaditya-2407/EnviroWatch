@@ -1,0 +1,27 @@
+# backend/api/predict.py
+from flask import Blueprint, request, jsonify
+from models.model_wrapper import load_model, predict_single
+
+predict_bp = Blueprint("predict", __name__)
+
+# lazy module-level global
+MODEL = None
+
+def _ensure_model():
+    global MODEL
+    if MODEL is None:
+        MODEL = load_model()
+    return MODEL
+
+@predict_bp.route("/predict", methods=["POST"])
+def predict():
+    model = _ensure_model()
+    payload = request.get_json(force=True, silent=True)
+    if not payload:
+        return jsonify({"error": "invalid or empty JSON"}), 400
+
+    try:
+        result = predict_single(model, payload)
+        return jsonify({"prediction": result}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
