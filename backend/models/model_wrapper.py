@@ -1,96 +1,84 @@
 # models/model_wrapper.py
 import os
 import joblib
+from typing import List, Optional
 
 class ModelWrapper:
-    def __init__(self, model_dir=None):
-        """
-        Load CatBoost model and discover which features are categorical.
-        """
-        # model directory (defaults to backend/models)
+    """
+    Loads a CatBoost model (cat.pkl) from models/ and provides:
+      - predict_from_dict(d) -> {"ok": True, "prediction": ..., "probabilities": ...}
+      - predict(df) -> raw model prediction array
+
+    This wrapper attempts to discover categorical columns from the loaded
+    CatBoost model metadata (feature_types_, feature_names_). If metadata
+    isn't available it falls back to a safe default (no cat features)
+    to avoid type-mismatch runtime errors while still allowing predictions.
+    """
+
+    DEFAULT_CAT_COLUMNS: List[str] = []  # empty by default: safer fallback
+
+    def __init__(self, model_dir: Optional[str] = None):
         self.model_dir = model_dir or os.path.join(os.getcwd(), "models")
         cat_pkl = os.path.join(self.model_dir, "cat.pkl")
         if not os.path.exists(cat_pkl):
             raise FileNotFoundError(f"No model found at {cat_pkl}")
 
-        # load the model
+        # load model (joblib)
         self.catboost_model = joblib.load(cat_pkl)
 
-        # try to introspect model feature names / types
+        # Try to introspect model metadata
         names = getattr(self.catboost_model, "feature_names_", None) or getattr(self.catboost_model, "feature_names", None)
         ft = getattr(self.catboost_model, "feature_types_", None)
 
         if ft and names and len(ft) == len(names):
-            # feature_types_ entries might be like "Categorical" or "Cat" or "Float"
+            # model-provided feature types may be "Float" or "Categorical" etc.
             self.categorical_columns = [n for n, t in zip(names, ft) if str(t).lower().startswith("cat")]
-            print("Detected categorical columns from model metadata:", self.categorical_columns)
         else:
-            # fall back to reasonable manual list (remove Location if model expects float)
-            # NOTE: adjust this list to match real training if needed
-            # fallback categorical list (adjust until no mismatch errors)
-            # If model metadata doesn't tell us types, treat all features as numeric
-# (avoid CatBoost mismatch errors). Update later if you know true categoricals.
-            self.categorical_columns = []
-            print("Using empty categorical_columns: treating all features as numeric")
+            # fallback: empty list (treat everything numeric) — safe to avoid CatBoost mismatch errors
+            # If you want to use explicit columns, set DEFAULT_CAT_COLUMNS above or set `self.categorical_columns`
+            self.categorical_columns = list(self.DEFAULT_CAT_COLUMNS)
 
-            print("Using fallback categorical_columns:", self.categorical_columns)
+        # If you know exact feature order used in training, optionally set self.feature_names here.
+        # self.feature_names = names or [...]
+        self.feature_names = list(names) if names else None
 
-        # feature order used when training (adjust if your model used different order)
-        self.feature_names = [
-            "Location","MinTemp","MaxTemp","Rainfall","Evaporation","Sunshine",
-            "WindGustDir","WindGustSpeed","WindDir9am","WindDir3pm",
-            "WindSpeed9am","WindSpeed3pm","Humidity9am","Humidity3pm",
-            "Pressure9am","Pressure3pm","Cloud9am","Cloud3pm","Temp9am","Temp3pm",
-            "RainToday","Date_month","Date_day"
-        ]
-
-        # Debug prints for troubleshooting (remove later)
-        try:
-            print("Loaded model. feature_names_:", getattr(self.catboost_model, "feature_names_", None))
-            print("Loaded model. feature_types_:", getattr(self.catboost_model, "feature_types_", None))
-        except Exception:
-            print("Loaded model. (no feature_names_/feature_types_ attrs)")
-
-    def predict_from_dict(self, d):
+    def _ensure_columns(self, df):
         """
-        Accepts a dict of feature_name: value and returns a JSON-serializable dict:
-            {"ok": True, "prediction": ..., "probabilities": ...}
+        Ensure expected columns exist in df (pandas.DataFrame).
+        If feature_names are known, ensure they exist (fill with None).
         """
+        if self.feature_names:
+            for c in self.feature_names:
+                if c not in df.columns:
+                    df[c] = None
+        return df
+
+    def predict_from_dict(self, d: dict):
         import pandas as pd
         from catboost import Pool
 
-        # Build single-row DataFrame
+        # single-row dataframe
         df = pd.DataFrame([d])
 
-        # Ensure expected features exist (fill missing with None)
-        for col in self.feature_names:
-            if col not in df.columns:
-                df[col] = None
+        # ensure expected columns exist (if known)
+        df = self._ensure_columns(df)
 
-        # Ensure categorical columns exist
-        for col in self.categorical_columns:
-            if col not in df.columns:
-                df[col] = None
-
-        # Convert categorical columns to strings (consistent)
+        # ensure categorical columns exist and are string-typed if present
         for c in self.categorical_columns:
+            if c not in df.columns:
+                df[c] = None
             df[c] = df[c].fillna("MISSING").astype(str)
 
-        # Numeric columns = everything else except date fields
+        # coerce numeric columns (everything else except known date parts)
         exclude = set(self.categorical_columns) | {"Date", "Date_month", "Date_day"}
-        numeric_cols = [c for c in df.columns if c not in exclude]
-        for nc in numeric_cols:
-            df[nc] = pd.to_numeric(df[nc], errors='coerce').fillna(0.0)
+        for col in [c for c in df.columns if c not in exclude]:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
-        # Debug
-        print("DEBUG df for pool:", df.to_dict(orient="records"))
-        print("DEBUG cat_features passed to Pool:", self.categorical_columns)
-
-        # Create Pool with categorical features specified (or None)
+        # create Pool: pass cat_features only if not empty, else None
         cat_features = self.categorical_columns if self.categorical_columns else None
         pool = Pool(df, cat_features=cat_features)
 
-        # Predict
+        # predict
         pred = self.catboost_model.predict(pool)
         proba = None
         if hasattr(self.catboost_model, "predict_proba"):
@@ -104,25 +92,27 @@ class ModelWrapper:
 
     def predict(self, df):
         """
-        Convenience: accepts pandas.DataFrame and returns raw model prediction(s).
-        Ensures types are coerced similarly to predict_from_dict.
+        Accepts a pandas.DataFrame (or convertible). Returns model prediction array.
+        Ensures same coercion rules as predict_from_dict.
         """
-        from catboost import Pool
         import pandas as pd
+        from catboost import Pool
 
-        # ensure a DataFrame
-        if not isinstance(df, (pd.DataFrame,)):
+        if not isinstance(df, pd.DataFrame):
             df = pd.DataFrame(df)
 
-        # Ensure categorical columns present & string-typed
+        # ensure expected columns if known
+        df = self._ensure_columns(df)
+
+        # categorical columns string-typed
         for c in self.categorical_columns:
             if c in df.columns:
                 df[c] = df[c].fillna("MISSING").astype(str)
 
-        # Coerce numeric columns (exclude categorical & date)
+        # coerce numeric columns
         exclude = set(self.categorical_columns) | {"Date", "Date_month", "Date_day"}
-        for nc in [c for c in df.columns if c not in exclude]:
-            df[nc] = pd.to_numeric(df[nc], errors='coerce').fillna(0.0)
+        for col in [c for c in df.columns if c not in exclude]:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
         pool = Pool(df, cat_features=self.categorical_columns if self.categorical_columns else None)
         return self.catboost_model.predict(pool)
