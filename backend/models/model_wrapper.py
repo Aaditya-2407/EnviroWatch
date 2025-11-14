@@ -1,74 +1,48 @@
-import os
-import joblib
-import json
-import pandas as pd
-
+import os, joblib, pandas as pd
 
 class ModelWrapper:
-    """Lightweight wrapper that lazy-loads a CatBoost model saved either as
-    joblib pickle (.pkl) or CatBoost native (.cbm). Provides `predict_from_dict`.
-    """
-    def __init__(self, model_dir=None):
-        base = os.path.dirname(os.path.dirname(__file__))
-        self.model_dir = model_dir or os.path.join(base, "models")
-        # candidate files
-        self.pkl_path = os.path.join(self.model_dir, "cat.pkl")
-        self.cbm_path = os.path.join(self.model_dir, "cat.cbm")
-        self._model = None
+    def __init__(self, models_dir=None):
+        self.models_dir = models_dir or os.path.join(os.getcwd(), "models")
+        # try both .cbm and .pkl
+        p_cbm = os.path.join(self.models_dir, "cat.cbm")
+        p_pkl = os.path.join(self.models_dir, "cat.pkl")
+        if os.path.exists(p_cbm):
+            from catboost import CatBoostClassifier
+            self.model = CatBoostClassifier()
+            self.model.load_model(p_cbm)
+        elif os.path.exists(p_pkl):
+            self.model = joblib.load(p_pkl)
+        else:
+            raise FileNotFoundError(f"No model found (cat.cbm or cat.pkl) in {self.models_dir}")
 
-    def _load(self):
-        # try native cbm first (safer across numpy/catboost wheel mismatches)
-        if os.path.exists(self.cbm_path):
+        self.feature_names = getattr(self.model, "feature_names_", None)
+
+    def predict_from_dict(self, d: dict):
+        # convert to single-row DataFrame
+        df = pd.DataFrame([d])
+        # reorder columns to match training if feature_names present
+        if self.feature_names:
+            # ensure all required cols present
+            missing = [c for c in self.feature_names if c not in df.columns]
+            if missing:
+                raise ValueError("Missing feature columns: " + ", ".join(missing))
+            df = df[self.feature_names]
+        # ensure string categories are strings
+        for col in df.select_dtypes(include=["object"]).columns:
+            df[col] = df[col].astype(str)
+
+        pred = self.model.predict(df)
+        proba = None
+        if hasattr(self.model, "predict_proba"):
             try:
-                from catboost import CatBoostClassifier
-                cb = CatBoostClassifier()
-                cb.load_model(self.cbm_path)
-                self._model = cb
-                return
+                proba = self.model.predict_proba(df).tolist()
             except Exception:
-                pass
+                proba = None
 
-        if os.path.exists(self.pkl_path):
-            # joblib pickle (may require same catboost binary)
-            self._model = joblib.load(self.pkl_path)
-            return
+        # normalize outputs into JSON serializable types
+        if hasattr(pred, "tolist"):
+            pred_out = pred.tolist()
+        else:
+            pred_out = pred
 
-        raise FileNotFoundError("No model found (cat.cbm or cat.pkl) in %s" % self.model_dir)
-
-    @property
-    def model(self):
-        if self._model is None:
-            self._load()
-        return self._model
-
-    def predict_from_dict(self, data: dict):
-        """Accepts a single-row dict with feature names -> returns prediction dict.
-        Converts to a DataFrame, calls predict / predict_proba where available.
-        """
-        # convert to DataFrame with one row
-        df = pd.DataFrame([data])
-
-        m = self.model
-        out = {"ok": True}
-
-        # If CatBoost native API
-        try:
-            if hasattr(m, "predict_proba"):
-                probs = m.predict_proba(df)
-                # ensure serializable
-                out["probabilities"] = probs.tolist()
-        except Exception:
-            # ignore but not fatal
-            out["probabilities"] = None
-
-        try:
-            preds = m.predict(df)
-            # convert numpy types
-            if hasattr(preds, "tolist"):
-                out["prediction"] = preds.tolist()
-            else:
-                out["prediction"] = preds
-        except Exception:
-            out["prediction"] = None
-
-        return out
+        return {"ok": True, "prediction": pred_out, "probabilities": proba}

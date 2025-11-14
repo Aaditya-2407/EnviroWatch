@@ -1,57 +1,61 @@
-import os
 from flask import Flask, request, jsonify
 from models.model_wrapper import ModelWrapper
+import traceback
+# at top:
+from models.schemas import PredictPayload
+from pydantic import ValidationError
+
+# inside predict route (replace current get_json logic)
+try:
+    payload = PredictPayload.parse_obj(data)  # will raise ValidationError on bad payload
+except ValidationError as e:
+    return jsonify({"ok": False, "error": "Invalid payload", "details": e.errors()}), 400
+
+# then use payload.dict() to pass to your model wrapper
+prediction_result = model.predict_from_dict(payload.dict())
 
 
-# Initialize the Flask application
 app = Flask(__name__)
-
-# Initialize the model wrapper
-# This will load the model on the first request (lazy loading)
-# Assumes a 'models' folder exists at the same level as app.py
 try:
     model = ModelWrapper()
 except Exception as e:
-    print(f"Failed to initialize ModelWrapper: {e}")
-    # You might want to handle this more gracefully
+    print("ModelWrapper init failed:", e)
     model = None
-
-@app.route("/")
-def index():
-    """A simple health check endpoint."""
-    return "Model API is running!"
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    """
-    The main prediction endpoint.
-    Expects JSON data with features.
-    """
     if model is None:
         return jsonify({"ok": False, "error": "Model failed to initialize"}), 500
 
-    # Get the JSON data from the request
-    try:
-        data = request.get_json()
-        if data is None:
-            raise ValueError("No JSON payload received.")
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"Bad request: {e}"}), 400
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"ok": False, "error": "No JSON payload received"}), 400
 
-    # Use the wrapper to get a prediction
+    # Log incoming payload to console to verify keys/types
+    print("INCOMING JSON:", data)
+
+    # Try to use wrapper if exists
     try:
-        prediction_result = model.predict_from_dict(data)
-        return jsonify(prediction_result)
-        
+        # if your wrapper has predict_from_dict, call it
+        if hasattr(model, "predict_from_dict"):
+            res = model.predict_from_dict(data)
+            print("Wrapper result:", res)
+            return jsonify(res), 200
+        # else, do a direct DataFrame predict attempt
+        import pandas as pd
+        df = pd.DataFrame([data])
+        pred = getattr(model, "predict", lambda x: None)(df)
+        proba = None
+        if hasattr(model, "predict_proba"):
+            try:
+                proba = model.predict_proba(df).tolist()
+            except Exception as e:
+                print("predict_proba failed:", e)
+        out = {"ok": True, "prediction": pred.tolist() if hasattr(pred, "tolist") else pred, "probabilities": proba}
+        print("Direct predict result:", out)
+        return jsonify(out), 200
     except FileNotFoundError as e:
-        # Specific error if model files are missing
         return jsonify({"ok": False, "error": str(e)}), 500
     except Exception as e:
-        # Generic server error for other issues
+        traceback.print_exc()
         return jsonify({"ok": False, "error": f"Internal server error: {e}"}), 500
-
-if __name__ == "__main__":
-    # This allows running the app directly with 'python app.py'
-    # The 'flask run' command in your script will use this block.
-    port = int(os.environ.get("PORT", 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
