@@ -1,57 +1,57 @@
 import os
-from flask import Flask, send_from_directory, render_template, jsonify, request
-from flask_cors import CORS
+from flask import Flask, request, jsonify
+from models.model_wrapper import ModelWrapper
 
 
+# Initialize the Flask application
+app = Flask(__name__)
 
+# Initialize the model wrapper
+# This will load the model on the first request (lazy loading)
+# Assumes a 'models' folder exists at the same level as app.py
+try:
+    model = ModelWrapper()
+except Exception as e:
+    print(f"Failed to initialize ModelWrapper: {e}")
+    # You might want to handle this more gracefully
+    model = None
 
-def create_app():
-	# create Flask app with custom template/static folders
-	base = os.path.dirname(__file__)
-	app = Flask(
-		__name__,
-		template_folder=os.path.join(base, "template"),
-		static_folder=os.path.join(base, "static"),
-		static_url_path="/static",
-	)
-	CORS(app)
+@app.route("/")
+def index():
+    """A simple health check endpoint."""
+    return "Model API is running!"
 
+@app.route("/predict", methods=["POST"])
+def predict():
+    """
+    The main prediction endpoint.
+    Expects JSON data with features.
+    """
+    if model is None:
+        return jsonify({"ok": False, "error": "Model failed to initialize"}), 500
 
-	# internal dev ping route
-	@app.route("/internal_ping", methods=["GET"])
-	def internal_ping():
-		# allow only local dev callers
-		if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
-			return jsonify({"error": "not allowed"}), 403
-		return jsonify({"status": "ok", "note": "dev-only internal_ping"}), 200
+    # Get the JSON data from the request
+    try:
+        data = request.get_json()
+        if data is None:
+            raise ValueError("No JSON payload received.")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Bad request: {e}"}), 400
 
-
-	# register blueprints
-	from api.predict import predict_bp
-	from api.health import health_bp
-
-
-	app.register_blueprint(predict_bp, url_prefix="/api")
-	app.register_blueprint(health_bp, url_prefix="/api")
-
-
-	@app.route("/", methods=["GET"])
-	def index():
-		try:
-			return render_template("index.html")
-		except Exception:
-			# fallback to serving the raw file if rendering fails
-			return send_from_directory(app.template_folder, "index.html")
-
-
-	return app
-
-
-
-
-# expose app for `flask run`
-app = create_app()
-
+    # Use the wrapper to get a prediction
+    try:
+        prediction_result = model.predict_from_dict(data)
+        return jsonify(prediction_result)
+        
+    except FileNotFoundError as e:
+        # Specific error if model files are missing
+        return jsonify({"ok": False, "error": str(e)}), 500
+    except Exception as e:
+        # Generic server error for other issues
+        return jsonify({"ok": False, "error": f"Internal server error: {e}"}), 500
 
 if __name__ == "__main__":
-	app.run(debug=True)
+    # This allows running the app directly with 'python app.py'
+    # The 'flask run' command in your script will use this block.
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host='0.0.0.0', port=port)

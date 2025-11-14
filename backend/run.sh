@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-# run this from repo backend/ dir
 export FLASK_APP=app
 export FLASK_ENV=development
-python -m flask run --debug
+python -m flask run --host=127.0.0.1 --port=5000 --debug
