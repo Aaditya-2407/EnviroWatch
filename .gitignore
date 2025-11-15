@@ -1,0 +1,17 @@
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenvs
+.venv/
+venv/
+
+# Models & binaries
+models/*.pkl
+models/*.cbm
+*.pkl
+
+# editor
+.vscode/
+.DS_Store
