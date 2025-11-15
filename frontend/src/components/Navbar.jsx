@@ -8,7 +8,7 @@ export default function Navbar() {
   const toggleMenu = () => setOpen(!open);
 
   return (
-    <nav className="bg-gray-900 text-white w-full shadow-lg z-50">
+    <nav className="bg-gray-900 text-white w-full shadow-lg z-50 hidden">
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         
         {/* Logo / Title */}
