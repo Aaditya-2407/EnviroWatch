@@ -16,3 +16,13 @@ freeze_all.txt
 # trained models
 models/*.pkl
 *.pkl
+
+# python/venv artifacts
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+env/
+# models
+models/*.pkl

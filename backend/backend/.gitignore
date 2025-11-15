@@ -1,0 +1,18 @@
+# virtualenv
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+
+# model artifacts
+models/models/*.pkl
+models/models/*.cbm
+
+# local pip freeze dump
+freeze_all.txt
+
+
+# trained models
+models/*.pkl
+*.pkl
