@@ -111,7 +111,7 @@ export default function AQIPredictor() {
         </div>
         <div>
           <h1 className="text-2xl font-semibold text-white">AQI Predictor</h1>
-          <p className="text-sm text-gray-400 mt-1">Offline, fake AQI estimate for demo.</p>
+          <p className="text-sm text-gray-400 mt-1">Predict AQI at your area</p>
         </div>
       </header>
 
