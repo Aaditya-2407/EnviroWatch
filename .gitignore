@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # virtualenv
 .venv/
 __pycache__/
@@ -26,3 +27,16 @@ venv/
 env/
 # models
 models/*.pkl
+=======
+
+# model binaries
+models/*.pkl
+*.pkl
+
+
+# cache
+__pycache__/
+*.py[cod]
+.venv/
+
+>>>>>>> 430f055 (chore: add models/*.pkl and cache to .gitignore)
