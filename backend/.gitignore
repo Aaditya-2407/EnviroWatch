@@ -12,3 +12,4 @@ models/models/*.cbm
 # local pip freeze dump
 freeze_all.txt
 
+.env
