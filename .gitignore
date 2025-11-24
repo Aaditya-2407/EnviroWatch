@@ -40,3 +40,5 @@ __pycache__/
 .venv/
 
 >>>>>>> 430f055 (chore: add models/*.pkl and cache to .gitignore)
+__pycache__/
+*.pyc
