@@ -44,3 +44,15 @@ __pycache__/
 *.pyc
 __pycache__/
 *.pyc
+
+
+# model binaries
+models/*.pkl
+*.pkl
+
+
+# cache
+__pycache__/
+*.py[cod]
+.venv/
+
